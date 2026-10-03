@@ -1,0 +1,233 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  MEMBER
+  ADMIN
+}
+
+enum TeamRole {
+  TEAM_LEAD
+  MEMBER
+  APPROVER
+}
+
+enum WorkItemStatus {
+  TODO
+  IN_PROGRESS
+  IN_REVIEW
+  DONE
+}
+
+enum WorkItemPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum WorkItemType {
+  TASK
+  BUG
+  FEATURE
+  INCIDENT
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum NotificationType {
+  WORK_ITEM_ASSIGNED
+  WORK_ITEM_UPDATED
+  COMMENT_ADDED
+  APPROVAL_REQUESTED
+  APPROVAL_DECIDED
+  TEAM_INVITE
+}
+
+model User {
+  id            String    @id @default(uuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?
+  role          UserRole  @default(MEMBER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  teams                  TeamMember[]
+  createdItems           WorkItem[]     @relation("CreatedBy")
+  assignedItems          WorkItem[]     @relation("AssignedTo")
+  ownedItems             WorkItem[]     @relation("OwnedBy")
+  comments               Comment[]
+  requestedApprovals     Approval[]     @relation("ApprovalRequester")
+  reviewedApprovals      Approval[]     @relation("ApprovalReviewer")
+  activities             ActivityLog[]
+  notifications          Notification[] @relation("NotificationRecipient")
+  triggeredNotifications Notification[] @relation("NotificationActor")
+
+  @@index([role])
+  @@index([createdAt])
+}
+
+model Team {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members   TeamMember[]
+  workItems WorkItem[]
+
+  @@unique([name])
+  @@index([createdAt])
+}
+
+model TeamMember {
+  id        String   @id @default(uuid())
+  role      TeamRole @default(MEMBER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId String
+
+  @@unique([userId, teamId])
+  @@index([teamId, role])
+  @@index([userId])
+}
+
+model WorkItem {
+  id               String           @id @default(uuid())
+  title            String
+  description      String?
+  type             WorkItemType     @default(TASK)
+  status           WorkItemStatus   @default(TODO)
+  priority         WorkItemPriority @default(MEDIUM)
+  requiresApproval Boolean          @default(false)
+  version          Int              @default(1)
+  dueDate          DateTime?
+  idempotencyKey   String?          @unique
+  idempotencyHash  String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  deletedAt        DateTime?
+
+  creator   User   @relation("CreatedBy", fields: [creatorId], references: [id])
+  creatorId String
+
+  assignee   User?   @relation("AssignedTo", fields: [assigneeId], references: [id])
+  assigneeId String?
+
+  owner   User?   @relation("OwnedBy", fields: [ownerId], references: [id])
+  ownerId String?
+
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId String
+
+  comments      Comment[]
+  approvals     Approval[]
+  activities    ActivityLog[]
+  notifications Notification[]
+
+  @@index([teamId, status])
+  @@index([teamId, priority])
+  @@index([teamId, type])
+  @@index([teamId, deletedAt])
+  @@index([ownerId, status])
+  @@index([assigneeId, status])
+  @@index([creatorId])
+  @@index([dueDate])
+  @@index([createdAt])
+  @@index([updatedAt])
+}
+
+model Comment {
+  id        String    @id @default(uuid())
+  content   String
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime?
+
+  author     User     @relation(fields: [authorId], references: [id])
+  authorId   String
+  workItem   WorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  workItemId String
+
+  @@index([workItemId, createdAt])
+  @@index([authorId])
+}
+
+model Approval {
+  id          String         @id @default(uuid())
+  status      ApprovalStatus @default(PENDING)
+  requestedAt DateTime       @default(now())
+  decidedAt   DateTime?
+  note        String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  requester   User   @relation("ApprovalRequester", fields: [requesterId], references: [id])
+  requesterId String
+  reviewer    User   @relation("ApprovalReviewer", fields: [reviewerId], references: [id])
+  reviewerId  String
+
+  workItem   WorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  workItemId String
+
+  @@unique([workItemId, reviewerId, status])
+  @@index([reviewerId, status])
+  @@index([requesterId])
+  @@index([workItemId, status])
+}
+
+model ActivityLog {
+  id        String   @id @default(uuid())
+  action    String
+  details   Json?
+  createdAt DateTime @default(now())
+
+  user       User     @relation(fields: [userId], references: [id])
+  userId     String
+  workItem   WorkItem @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  workItemId String
+
+  @@index([workItemId, createdAt])
+  @@index([userId, createdAt])
+  @@index([action])
+  @@index([createdAt])
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  type      NotificationType
+  title     String
+  body      String?
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  recipient   User    @relation("NotificationRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  recipientId String
+  actor       User?   @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actorId     String?
+
+  workItem   WorkItem? @relation(fields: [workItemId], references: [id], onDelete: Cascade)
+  workItemId String?
+
+  @@index([recipientId, readAt, createdAt])
+  @@index([workItemId])
+  @@index([type])
+}
